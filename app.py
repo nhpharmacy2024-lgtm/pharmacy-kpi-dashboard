@@ -83,7 +83,7 @@ def save_settings(target_monthly: int, bonus_amount: int, bonus_title: str):
     load_settings.clear()
 
 def kpi_card(label: str, value: str, help_text: str = ""):
-    st.metric(label, value, help_text=help_text)
+    st.metric(label, value, help=help_text)
 
 st.title("💊 藥局營業額儀表板｜當日＆當月累計")
 
