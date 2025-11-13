@@ -1,4 +1,3 @@
-\
 import os
 import json
 import pytz
@@ -89,6 +88,9 @@ st.title("💊 藥局營業額儀表板｜當日＆當月累計")
 
 tab_dashboard, tab_admin = st.tabs(["📈 儀表板", "🛠️ 管理後台"])
 
+# ========================
+# 📈 儀表板
+# ========================
 with tab_dashboard:
     settings = load_settings()
     today = taipei_today()
@@ -108,9 +110,12 @@ with tab_dashboard:
     remain = max(target - mtd, 0.0)
 
     c1, c2, c3, c4 = st.columns(4)
-    with c1: kpi_card("今日營業額", f"${today_amount:,.0f}")
-    with c2: kpi_card("本月累計", f"${mtd:,.0f}")
-    with c3: kpi_card("本月目標", f"${target:,.0f}")
+    with c1:
+        kpi_card("今日營業額", f"${today_amount:,.0f}")
+    with c2:
+        kpi_card("本月累計", f"${mtd:,.0f}")
+    with c3:
+        kpi_card("本月目標", f"${target:,.0f}")
     with c4:
         rate = mtd / target * 100 if target > 0 else 0
         kpi_card("達成率", f"{rate:.1f}%")
@@ -125,10 +130,25 @@ with tab_dashboard:
     if df.empty:
         st.warning("本月尚無資料。請至後台新增每日營業額。")
     else:
+        # 準備圖表資料
         chart_df = df.copy()
         chart_df["date"] = pd.to_datetime(chart_df["date"])
+        chart_df = chart_df.sort_values("date")
+
+        # 新增「累積營業額」欄位
+        chart_df["cumulative_amount"] = chart_df["amount"].cumsum()
+
+        # 📊 圖 1：每日營業額
+        st.subheader("📊 每日營業額")
         st.line_chart(chart_df, x="date", y="amount", height=280)
 
+        # 📈 圖 2：本月累積營業額
+        st.subheader("📈 本月累積營業額")
+        st.line_chart(chart_df, x="date", y="cumulative_amount", height=280)
+
+# ========================
+# 🛠️ 管理後台
+# ========================
 with tab_admin:
     st.subheader("管理後台（僅管理者）")
     pw = st.text_input("後台密碼", type="password")
@@ -139,9 +159,19 @@ with tab_admin:
     s = load_settings()
     col1, col2, col3 = st.columns(3)
     with col1:
-        target_in = st.number_input("當月目標金額（元）", min_value=0, step=10000, value=int(s.get("target_monthly", 600000)))
+        target_in = st.number_input(
+            "當月目標金額（元）",
+            min_value=0,
+            step=10000,
+            value=int(s.get("target_monthly", 600000)),
+        )
     with col2:
-        bonus_in = st.number_input("團體獎金（元）", min_value=0, step=1000, value=int(s.get("bonus_amount", 6000)))
+        bonus_in = st.number_input(
+            "團體獎金（元）",
+            min_value=0,
+            step=1000,
+            value=int(s.get("bonus_amount", 6000)),
+        )
     with col3:
         title_in = st.text_input("獎金名稱", value=s.get("bonus_title", "團體獎金"))
 
