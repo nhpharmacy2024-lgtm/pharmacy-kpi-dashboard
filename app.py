@@ -2,11 +2,13 @@ import os
 import json
 import pytz
 import pandas as pd
+import calendar
 from datetime import datetime, date
 
 import streamlit as st
 from google.oauth2 import service_account
 from google.cloud import firestore
+import altair as alt
 
 # ---------- Page & TZ ----------
 st.set_page_config(page_title="藥局營業額儀表板", page_icon="💊", layout="wide")
@@ -109,6 +111,7 @@ with tab_dashboard:
     progress = 0.0 if target <= 0 else min(mtd / target, 1.0)
     remain = max(target - mtd, 0.0)
 
+    # --- 第一排 KPI ---
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         kpi_card("今日營業額", f"${today_amount:,.0f}")
@@ -122,29 +125,89 @@ with tab_dashboard:
 
     st.progress(progress, text=f"{month_label} 目標達成進度：{progress*100:.1f}%")
 
+    # --- 達標 / 未達提示 ---
     if mtd >= target:
         st.success(f"🎉 已達成 {month_label} 目標！{bonus_title} 已解鎖：${bonus_amt:,.0f}")
     else:
         st.info(f"距離 {bonus_title} 還差：${remain:,.0f}")
 
+    # --- 若有資料，再顯示預估與圖表 ---
     if df.empty:
         st.warning("本月尚無資料。請至後台新增每日營業額。")
     else:
-        # 準備圖表資料
+        # 準備基礎資料
+        df = df.sort_values("date")
         chart_df = df.copy()
         chart_df["date"] = pd.to_datetime(chart_df["date"])
-        chart_df = chart_df.sort_values("date")
 
-        # 新增「累積營業額」欄位
-        chart_df["cumulative_amount"] = chart_df["amount"].cumsum()
+        # ---------- 第二排 KPI：預估與成長 ----------
+        days_in_month = calendar.monthrange(year, month)[1]
+        day_today = today.day
+        daily_avg = mtd / day_today if day_today > 0 else 0
+        projected_month = daily_avg * days_in_month if day_today > 0 else 0
 
-        # 📊 圖 1：每日營業額
+        # 近 7 日與前一個 7 日
+        df_sorted = df.sort_values("date")
+        last_7 = df_sorted.tail(7)["amount"].sum()
+        prev_7 = None
+        if len(df_sorted) >= 14:
+            prev_7 = df_sorted.tail(14).head(7)["amount"].sum()
+
+        c5, c6, c7, c8 = st.columns(4)
+        with c5:
+            kpi_card("本月日均營業額", f"${daily_avg:,.0f}" if day_today > 0 else "-", "")
+        with c6:
+            kpi_card("預估月底營業額", f"${projected_month:,.0f}" if day_today > 0 else "-", "")
+        with c7:
+            if day_today > 0 and target > 0:
+                # 用「目標 - 預估」來看還差多少
+                gap = target - projected_month
+
+                if gap > 0:
+                    # 只有「預估沒達標」時才提醒
+                    v = f"-${gap:,.0f}"
+                    h = "照目前速度推估，月底可能仍未達目標，需再加把勁 💪"
+                    kpi_card("預估未達目標金額", v, h)
+                else:
+                    # 已可達標或超標時，不特別提醒，只給個安心訊息
+                    kpi_card("預估未達目標金額", "0", "以目前速度推估可達成目標")
+            else:
+                kpi_card("預估未達目標金額", "-", "資料不足")
+        with c8:
+            if prev_7 is not None and prev_7 > 0:
+                growth_pct = (last_7 / prev_7 - 1) * 100
+                help_txt = f"相較前一個 7 日：{growth_pct:+.1f}%"
+            else:
+                help_txt = "資料不足以計算成長率"
+            kpi_card("近 7 日營業額", f"${last_7:,.0f}", help_txt)
+
+        st.divider()
+
+        # ---------- 圖 1：每日營業額 ----------
         st.subheader("📊 每日營業額")
         st.line_chart(chart_df, x="date", y="amount", height=280)
 
-        # 📈 圖 2：本月累積營業額
+        # ---------- 圖 2：本月累積營業額 + 目標水平線 ----------
         st.subheader("📈 本月累積營業額")
-        st.line_chart(chart_df, x="date", y="cumulative_amount", height=280)
+
+        cum_df = chart_df.copy()
+        cum_df["cumulative_amount"] = cum_df["amount"].cumsum()
+        cum_df["target"] = target  # 每一點都帶同一個目標值，用來畫水平線
+
+        base = alt.Chart(cum_df).encode(
+            x=alt.X("date:T", title="日期"),
+        )
+
+        line_cum = base.mark_line().encode(
+            y=alt.Y("cumulative_amount:Q", title="累積營業額")
+        )
+
+        line_target = base.mark_rule(color="red", strokeDash=[4, 4]).encode(
+            y="target:Q"
+        )
+
+        chart = (line_cum + line_target).properties(height=320)
+        st.altair_chart(chart, use_container_width=True)
 
 # ========================
 # 🛠️ 管理後台
